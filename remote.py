@@ -1,17 +1,17 @@
 from fastmcp import FastMCP
 import os
-import sqlite3
+import aiosqlite
+import asyncio
 
 mcp = FastMCP(name="expense_tracker")
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "expenses.db")
 CATEGORIES_PATH = os.path.join(os.path.dirname(__file__), "categories.json")
 
-def init_db():
+async def init_db():
     """Initialize the SQLite database and create the expenses table if it doesn't exist"""
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute('''
             CREATE TABLE IF NOT EXISTS expenses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date TEXT NOT NULL,
@@ -21,12 +21,13 @@ def init_db():
                 note TEXT
             )
         ''')
-        conn.commit()
+        await conn.commit()
 
-init_db()
+# Ensure DB initialized on startup
+asyncio.run(init_db())
 
 @mcp.tool
-def add_expense(date: str, amount: float, category: str, subcategory: str|None = None, note: str|None = None):
+async def add_expense(date: str, amount: float, category: str, subcategory: str|None = None, note: str|None = None):
     """Add a new expense entry
     
         Args:
@@ -38,26 +39,24 @@ def add_expense(date: str, amount: float, category: str, subcategory: str|None =
         Returns:
             dict: Status message with the ID of the added expense
     """
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
+    async with aiosqlite.connect(DB_PATH) as conn:
+        cursor = await conn.execute('''
             INSERT INTO expenses (date, amount, category, subcategory, note)
             VALUES (?, ?, ?, ?, ?)
         ''', (date, amount, category, subcategory, note))
-        conn.commit()
-    return {"status": "ok", id:cursor.lastrowid ,"message": "Expense added successfully"}
+        await conn.commit()
+        return {"status": "ok", "id": cursor.lastrowid, "message": "Expense added successfully"}
 
 @mcp.tool
-def list_expenses():
+async def list_expenses():
     """List all expense entries
     
         Returns:
             list: List of all expense entries
     """
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM expenses ORDER BY date DESC')
-        rows = cursor.fetchall()
+    async with aiosqlite.connect(DB_PATH) as conn:
+        cursor = await conn.execute('SELECT * FROM expenses ORDER BY date DESC')
+        rows = await cursor.fetchall()
     expenses = [
         {
             "id": row[0],
@@ -72,7 +71,7 @@ def list_expenses():
     return expenses
 
 @mcp.tool
-def list_expenses_in_range(start_date:str, end_date:str):
+async def list_expenses_in_range(start_date:str, end_date:str):
     """List all expense entries within a date range
     
         Args:
@@ -81,10 +80,9 @@ def list_expenses_in_range(start_date:str, end_date:str):
         Returns:
             list: List of expense entries within the specified date range
     """
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""SELECT * FROM expenses WHERE date BETWEEN ? AND ? ORDER BY date DESC""",(start_date,end_date))
-        rows = cursor.fetchall()
+    async with aiosqlite.connect(DB_PATH) as conn:
+        cursor = await conn.execute("""SELECT * FROM expenses WHERE date BETWEEN ? AND ? ORDER BY date DESC""",(start_date,end_date))
+        rows = await cursor.fetchall()
     expenses = [
         {
             "id": row[0],
@@ -99,7 +97,7 @@ def list_expenses_in_range(start_date:str, end_date:str):
     return expenses
 
 @mcp.tool
-def delete_expense(expense_id: int):
+async def delete_expense(expense_id: int):
     """Delete an expense entry by ID
     
         Args:
@@ -107,14 +105,13 @@ def delete_expense(expense_id: int):
         Returns:
             dict: Status message
     """
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM expenses WHERE id = ?', (expense_id,))
-        conn.commit()
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute('DELETE FROM expenses WHERE id = ?', (expense_id,))
+        await conn.commit()
     return {"status": "ok", "message": "Expense deleted successfully"}
 
 @mcp.tool
-def get_expense(expense_id: int):
+async def get_expense(expense_id: int):
     """Get details of a specific expense entry by ID
     
         Args:
@@ -122,10 +119,9 @@ def get_expense(expense_id: int):
         Returns:
             dict: Expense details or error message
     """
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM expenses WHERE id = ?', (expense_id,))
-        row = cursor.fetchone()
+    async with aiosqlite.connect(DB_PATH) as conn:
+        cursor = await conn.execute('SELECT * FROM expenses WHERE id = ?', (expense_id,))
+        row = await cursor.fetchone()
     if row:
         expense = {
             "id": row[0],
@@ -140,7 +136,7 @@ def get_expense(expense_id: int):
         return {"status": "error", "message": "Expense not found"}
     
 @mcp.tool
-def update_expense(expense_id: int, date: str|None = None, amount: float|None = None, category: str|None = None, subcategory: str|None = None, note: str|None = None):
+async def update_expense(expense_id: int, date: str|None = None, amount: float|None = None, category: str|None = None, subcategory: str|None = None, note: str|None = None):
     """Update an existing expense entry by ID
 
         Args:
@@ -153,8 +149,7 @@ def update_expense(expense_id: int, date: str|None = None, amount: float|None = 
         Returns:
             dict: Status message
     """
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
+    async with aiosqlite.connect(DB_PATH) as conn:
         fields = []
         values = []
         if date is not None:
@@ -174,12 +169,12 @@ def update_expense(expense_id: int, date: str|None = None, amount: float|None = 
             values.append(note)
         values.append(expense_id)
         sql = f'UPDATE expenses SET {", ".join(fields)} WHERE id = ?'
-        cursor.execute(sql, values)
-        conn.commit()
+        await conn.execute(sql, values)
+        await conn.commit()
     return {"status": "ok", "message": "Expense updated successfully"}
 
 @mcp.tool
-def summarize(start_date:str, end_date:str, category:str|None=None):
+async def summarize(start_date:str, end_date:str, category:str|None=None):
     """Summarize expenses within a date range, optionally filtered by category
     
         Args:
@@ -189,24 +184,22 @@ def summarize(start_date:str, end_date:str, category:str|None=None):
         Returns:
             dict: Total expense amount
     """
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
+    async with aiosqlite.connect(DB_PATH) as conn:
         if category:
-            cursor.execute("""SELECT SUM(amount) FROM expenses WHERE date BETWEEN ? AND ? AND category = ?""",(start_date,end_date,category))
+            cursor = await conn.execute("""SELECT SUM(amount) FROM expenses WHERE date BETWEEN ? AND ? AND category = ?""",(start_date,end_date,category))
         else:
-            cursor.execute("""SELECT SUM(amount) FROM expenses WHERE date BETWEEN ? AND ?""",(start_date,end_date))
-        total = cursor.fetchone()[0]
-    return {"total_expense": total if total else 0}
+            cursor = await conn.execute("""SELECT SUM(amount) FROM expenses WHERE date BETWEEN ? AND ?""",(start_date,end_date))
+        total = await cursor.fetchone()
+    return {"total_expense": total[0] if total and total[0] else 0}
 
 @mcp.resource("expense://categories", mime_type="application/json")
-def categories():
+async def categories():
     """Get the list of expense categories from the categories.json file
     
         Returns:
             str: JSON string of categories
     """
-    with open(CATEGORIES_PATH, "r" , encoding="utf-8") as f:
-        return f.read()
+    return await asyncio.to_thread(lambda: open(CATEGORIES_PATH, "r", encoding="utf-8").read())
 
 
 if __name__ == "__main__":
