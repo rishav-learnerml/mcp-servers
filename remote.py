@@ -24,7 +24,7 @@ async def init_db():
         await conn.commit()
 
 # Ensure DB initialized on startup
-asyncio.run(init_db())
+asyncio.get_event_loop().create_task(init_db())
 
 @mcp.tool
 async def add_expense(date: str, amount: float, category: str, subcategory: str|None = None, note: str|None = None):
