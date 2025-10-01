@@ -14,6 +14,7 @@ async def init_db():
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS expenses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
                 date TEXT NOT NULL,
                 amount REAL NOT NULL,
                 category TEXT NOT NULL,
@@ -27,10 +28,11 @@ async def init_db():
 asyncio.get_event_loop().create_task(init_db())
 
 @mcp.tool
-async def add_expense(date: str, amount: float, category: str, subcategory: str|None = None, note: str|None = None):
+async def add_expense(user_id: str, date: str, amount: float, category: str, subcategory: str|None = None, note: str|None = None):
     """Add a new expense entry
     
         Args:
+            user_id (str): ID of the user
             date (str): Date of the expense in YYYY-MM-DD format
             amount (float): Amount of the expense
             category (str): Category of the expense
@@ -41,105 +43,117 @@ async def add_expense(date: str, amount: float, category: str, subcategory: str|
     """
     async with aiosqlite.connect(DB_PATH) as conn:
         cursor = await conn.execute('''
-            INSERT INTO expenses (date, amount, category, subcategory, note)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (date, amount, category, subcategory, note))
+            INSERT INTO expenses (user_id, date, amount, category, subcategory, note)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (user_id, date, amount, category, subcategory, note))
         await conn.commit()
         return {"status": "ok", "id": cursor.lastrowid, "message": "Expense added successfully"}
 
 @mcp.tool
-async def list_expenses():
+async def list_expenses(user_id: str):
     """List all expense entries
     
+        Args:
+            user_id (str): ID of the user
         Returns:
             list: List of all expense entries
     """
     async with aiosqlite.connect(DB_PATH) as conn:
-        cursor = await conn.execute('SELECT * FROM expenses ORDER BY date DESC')
+        cursor = await conn.execute('SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC', (user_id,))
         rows = await cursor.fetchall()
     expenses = [
         {
             "id": row[0],
-            "date": row[1],
-            "amount": row[2],
-            "category": row[3],
-            "subcategory": row[4],
-            "note": row[5]
+            "user_id": row[1],
+            "date": row[2],
+            "amount": row[3],
+            "category": row[4],
+            "subcategory": row[5],
+            "note": row[6]
         }
         for row in rows
     ]
     return expenses
 
 @mcp.tool
-async def list_expenses_in_range(start_date:str, end_date:str):
+async def list_expenses_in_range(user_id: str, start_date:str, end_date:str):
     """List all expense entries within a date range
     
         Args:
+            user_id (str): ID of the user
             start_date (str): Start date in YYYY-MM-DD format
             end_date (str): End date in YYYY-MM-DD format
         Returns:
             list: List of expense entries within the specified date range
     """
     async with aiosqlite.connect(DB_PATH) as conn:
-        cursor = await conn.execute("""SELECT * FROM expenses WHERE date BETWEEN ? AND ? ORDER BY date DESC""",(start_date,end_date))
+        cursor = await conn.execute(
+            """SELECT * FROM expenses WHERE user_id = ? AND date BETWEEN ? AND ? ORDER BY date DESC""",
+            (user_id, start_date, end_date)
+        )
         rows = await cursor.fetchall()
     expenses = [
         {
             "id": row[0],
-            "date": row[1],
-            "amount": row[2],
-            "category": row[3],
-            "subcategory": row[4],
-            "note": row[5]
+            "user_id": row[1],
+            "date": row[2],
+            "amount": row[3],
+            "category": row[4],
+            "subcategory": row[5],
+            "note": row[6]
         }
         for row in rows
     ]
     return expenses
 
 @mcp.tool
-async def delete_expense(expense_id: int):
+async def delete_expense(user_id: str, expense_id: int):
     """Delete an expense entry by ID
     
         Args:
+            user_id (str): ID of the user
             expense_id (int): ID of the expense to delete
         Returns:
             dict: Status message
     """
     async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute('DELETE FROM expenses WHERE id = ?', (expense_id,))
+        await conn.execute('DELETE FROM expenses WHERE id = ? AND user_id = ?', (expense_id, user_id))
         await conn.commit()
     return {"status": "ok", "message": "Expense deleted successfully"}
 
 @mcp.tool
-async def get_expense(expense_id: int):
+async def get_expense(user_id: str, expense_id: int):
     """Get details of a specific expense entry by ID
     
         Args:
+            user_id (str): ID of the user
             expense_id (int): ID of the expense to retrieve
         Returns:
             dict: Expense details or error message
     """
     async with aiosqlite.connect(DB_PATH) as conn:
-        cursor = await conn.execute('SELECT * FROM expenses WHERE id = ?', (expense_id,))
+        cursor = await conn.execute('SELECT * FROM expenses WHERE id = ? AND user_id = ?', (expense_id, user_id))
         row = await cursor.fetchone()
     if row:
         expense = {
             "id": row[0],
-            "date": row[1],
-            "amount": row[2],
-            "category": row[3],
-            "subcategory": row[4],
-            "note": row[5]
+            "user_id": row[1],
+            "date": row[2],
+            "amount": row[3],
+            "category": row[4],
+            "subcategory": row[5],
+            "note": row[6]
         }
         return expense
     else:
         return {"status": "error", "message": "Expense not found"}
     
 @mcp.tool
-async def update_expense(expense_id: int, date: str|None = None, amount: float|None = None, category: str|None = None, subcategory: str|None = None, note: str|None = None):
+async def update_expense(user_id: str, expense_id: int, date: str|None = None, amount: float|None = None, category: str|None = None, subcategory: str|None = None, note: str|None = None):
     """Update an existing expense entry by ID
 
         Args:
+            user_id (str): ID of the user
             expense_id (int): ID of the expense to update
             date (str|None): New date in YYYY-MM-DD format (optional)
             amount (float|None): New amount (optional)
@@ -167,17 +181,18 @@ async def update_expense(expense_id: int, date: str|None = None, amount: float|N
         if note is not None:
             fields.append("note = ?")
             values.append(note)
-        values.append(expense_id)
-        sql = f'UPDATE expenses SET {", ".join(fields)} WHERE id = ?'
+        values.extend([expense_id, user_id])
+        sql = f'UPDATE expenses SET {", ".join(fields)} WHERE id = ? AND user_id = ?'
         await conn.execute(sql, values)
         await conn.commit()
     return {"status": "ok", "message": "Expense updated successfully"}
 
 @mcp.tool
-async def summarize(start_date:str, end_date:str, category:str|None=None):
+async def summarize(user_id: str, start_date:str, end_date:str, category:str|None=None):
     """Summarize expenses within a date range, optionally filtered by category
     
         Args:
+            user_id (str): ID of the user
             start_date (str): Start date in YYYY-MM-DD format
             end_date (str): End date in YYYY-MM-DD format
             category (str|None): Category to filter by (optional)
@@ -186,9 +201,15 @@ async def summarize(start_date:str, end_date:str, category:str|None=None):
     """
     async with aiosqlite.connect(DB_PATH) as conn:
         if category:
-            cursor = await conn.execute("""SELECT SUM(amount) FROM expenses WHERE date BETWEEN ? AND ? AND category = ?""",(start_date,end_date,category))
+            cursor = await conn.execute(
+                """SELECT SUM(amount) FROM expenses WHERE user_id = ? AND date BETWEEN ? AND ? AND category = ?""",
+                (user_id, start_date, end_date, category)
+            )
         else:
-            cursor = await conn.execute("""SELECT SUM(amount) FROM expenses WHERE date BETWEEN ? AND ?""",(start_date,end_date))
+            cursor = await conn.execute(
+                """SELECT SUM(amount) FROM expenses WHERE user_id = ? AND date BETWEEN ? AND ?""",
+                (user_id, start_date, end_date)
+            )
         total = await cursor.fetchone()
     return {"total_expense": total[0] if total and total[0] else 0}
 
